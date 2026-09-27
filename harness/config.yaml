@@ -1,0 +1,47 @@
+# Ouroboros — recursive dev loop configuration.
+# Everything the loop needs to know about YOUR machine and YOUR project
+# lives here. See INSTALL.md for a field-by-field walkthrough.
+
+project:
+  name: "my-project"                 # <-- CHANGE THIS: shown to agents in prompts
+  description: ""                    # <-- one or two sentences: what the project
+                                     #     does, its stack, who it's for
+
+product_repo: "C:/dev/my-project"   # <-- CHANGE THIS: path to the git repo
+                                     #     the loop improves (the loop itself
+                                     #     lives OUTSIDE that repo)
+main_branch: "main"                  # your default branch name
+
+models:
+  local:
+    base_url: "http://localhost:11434"
+    default: "qwen3:30b"             # <-- use `ollama list` names you have pulled
+    scout: "qwen3:30b"
+    implementer: "qwen3-coder:30b"
+    reviewer: "qwen3:30b"
+    planner: "qwen3:30b"
+  cloud_fallback:                    # used only when the local model call fails
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    model: "anthropic/claude-sonnet-4.5"   # <-- pick your fallback model
+
+planner:
+  enabled_for_feature_tickets: true  # run the planner role before the
+                                     # implementer on tickets with type: feature
+
+budgets:
+  max_iterations_per_ticket: 12      # implementer turns before the ticket is blocked
+  max_review_rounds: 2               # reviewer rejections before giving up
+  max_fix_iters_per_round: 3         # implementer turns allowed per review round
+  test_timeout_seconds: 600
+  max_diff_chars: 30000              # diff truncation for the reviewer prompt
+
+gates:
+  test_command: "pytest -q"          # <-- CHANGE THIS to your test command
+  require_human_approval_for_merge: true   # set false once you trust the loop
+  protected_paths:                   # the implementer can never write these
+    - ".env"
+    - "secrets/"
+
+notifications:
+  discord_webhook: ""                # optional: post cycle results to Discord

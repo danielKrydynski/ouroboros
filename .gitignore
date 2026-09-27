@@ -1,0 +1,11 @@
+# Throwaway git worktrees created per cycle
+worktrees/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Logs
+*.log
+# Local overrides (never commit your machine-specific config)
+harness/config.local.yaml
