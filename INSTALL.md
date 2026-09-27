@@ -43,7 +43,7 @@ C:\dev\                      ~/dev/
 ### Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/yourname/ouroboros.git
+git clone https://github.com/danielKrydynski/ouroboros.git
 cd ouroboros
 .\setup\setup.ps1
 ```
@@ -58,7 +58,7 @@ pip install -r requirements.txt
 ### macOS / Linux (bash)
 
 ```bash
-git clone https://github.com/yourname/ouroboros.git
+git clone https://github.com/danielKrydynski/ouroboros.git
 cd ouroboros
 ./setup/setup.sh
 # or by hand:

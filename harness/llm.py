@@ -13,7 +13,7 @@ import requests
 DEFAULT_CTX = 32768
 
 # Shown to OpenRouter as the requesting app. Change to your repo URL.
-APP_REFERER = "https://github.com/yourname/ouroboros"
+APP_REFERER = "https://github.com/danielKrydynski/ouroboros"
 APP_TITLE = "ouroboros-dev-loop"
 
 
