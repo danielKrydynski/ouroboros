@@ -10,7 +10,7 @@ import os
 
 import requests
 
-DEFAULT_CTX = 32768
+DEFAULT_CTX = 8192
 
 # Shown to OpenRouter as the requesting app. Change to your repo URL.
 APP_REFERER = "https://github.com/danielKrydynski/ouroboros"
@@ -33,6 +33,7 @@ def ollama_chat(base_url: str, model: str, system: str, user: str,
             "model": model,
             "messages": _messages(system, user),
             "stream": False,
+            "think": False,
             "options": {"num_ctx": DEFAULT_CTX},
         },
         timeout=timeout,

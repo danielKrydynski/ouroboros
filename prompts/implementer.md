@@ -31,3 +31,8 @@ Propose each changed file as its own block — nothing else creates files:
 4. Match the existing code style of each file you touch.
 5. If the ticket is already satisfied, say so in plain text and propose no files.
 6. When tests fail, the failure output is ground truth: fix the cause, not the symptom.
+7. You MUST reproduce the ENTIRE existing file verbatim when rewriting it.
+   Deleting existing content (lines, sections, or files) fails the iteration —
+   the harness will detect it and reject your output. Only ADD new content.
+   If the file is too large to reproduce from context, propose a smaller, focused
+   change to a smaller file instead.

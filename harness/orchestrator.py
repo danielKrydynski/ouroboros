@@ -32,9 +32,30 @@ TICKETS_DIR = ROOT / "tickets"
 WORKTREES = ROOT / "worktrees"
 
 FILE_BLOCK = re.compile(r"### FILE:\s*(\S+)\s*\n```(?:\w+)?\n(.*?)```", re.DOTALL)
+APPEND_BLOCK = re.compile(r"### APPEND:\s*(\S+)\s*\n```(?:\w+)?\n(.*?)```", re.DOTALL)
 VERDICT = re.compile(r"VERDICT:\s*(APPROVE|REJECT)", re.IGNORECASE)
 
 GIT_USER = "ouroboros-loop"
+
+# Test runs leave bytecode/caches inside the worktree (__pycache__,
+# .pytest_cache, .mypy_cache, ...). The implementer's `git add -A` would sweep
+# them into the commit and pollute the reviewer's diff, so strip them before
+# staging. This is worktree hygiene, not policy — we never touch the product
+# repo's .gitignore.
+_ARTIFACT_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache"}
+
+
+def _strip_test_artifacts(repo: Path) -> None:
+    for p in sorted(repo.rglob("*"), reverse=True):
+        if ".git" in p.parts:
+            continue
+        if p.is_dir() and p.name in _ARTIFACT_DIRS:
+            for f in sorted(p.rglob("*"), reverse=True):
+                if f.is_file() or f.is_symlink():
+                    f.unlink(missing_ok=True)
+                elif f.is_dir():
+                    f.rmdir()
+            p.rmdir()
 
 
 # ---------------- shell helpers ----------------
@@ -120,7 +141,30 @@ def apply_files(repo: Path, text: str, protected: list[str]) -> list[str]:
     return written
 
 
+def apply_appends(repo: Path, text: str, protected: list[str]) -> list[str]:
+    """Apply the model's ### APPEND: blocks. Appends content to existing files.
+    The harness handles line breaks; start content with a blank line for markdown sections.
+    APPEND cannot modify or delete existing content. If the file doesn't exist, it is created."""
+    written = []
+    for raw_path, content in APPEND_BLOCK.findall(text):
+        rel = safe_relpath(raw_path.strip())
+        if is_protected(rel, protected):
+            raise ValueError(f"blocked protected path: {raw_path}")
+        dest = repo / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            existing = dest.read_text(encoding="utf-8", errors="replace")
+            if not existing.endswith("\n"):
+                existing += "\n"
+            dest.write_text(existing + content, encoding="utf-8")
+        else:
+            dest.write_text(content, encoding="utf-8")
+        written.append(rel.as_posix())
+    return written
+
+
 def git_commit(repo: Path, message: str) -> bool:
+    _strip_test_artifacts(repo)
     sh(["git", "add", "-A"], cwd=repo, check=True)
     if not sh(["git", "status", "--porcelain"], cwd=repo).stdout.strip():
         return False
@@ -178,6 +222,7 @@ def run_implementer(cfg, ticket, wt) -> tuple[bool, str]:
     test_cmd = cfg["gates"]["test_command"]
     test_timeout = int(cfg["budgets"]["test_timeout_seconds"])
     protected = cfg["gates"]["protected_paths"]
+    max_deletions = int(cfg["gates"].get("max_deletions_per_iteration", 0))
 
     file_list = repo_file_list(wt)
     area_src = read_area_files(wt, ticket)
@@ -191,6 +236,55 @@ def run_implementer(cfg, ticket, wt) -> tuple[bool, str]:
         text, which = implementer_turn(cfg, ticket, wt, file_list, area_src,
                                        feedback, i, plan)
         written = apply_files(wt, text, protected)
+        # Destructive-change guard: compare original INSTALL.md (from main repo) with new content in worktree.
+        # If the model deletes > max_deletions lines, block it.
+        try:
+            # Original INSTALL.md from main repo (from config)
+            main_repo_path = Path(str(cfg.get("product_repo", "."))).expanduser()
+            original_repo_path = main_repo_path / "INSTALL.md"
+            if original_repo_path.exists():
+                original_content = original_repo_path.read_text(encoding="utf-8", errors="replace")
+                original_lines = original_content.split("\n")
+            else:
+                # Fallback: read what was proposed before apply
+                original_lines = existing.split("\n") if existing else []
+            # Get the new content from worktree after apply_files
+            target_path_str = ticket.meta.get("area", ",").strip().split(",")[0].strip()
+            new_path = wt / target_path_str
+            if new_path.exists() and new_path.is_file():
+                new_content = new_path.read_text(encoding="utf-8", errors="replace")
+                new_lines = new_content.split("\n")
+                deleted_lines = max(0, len(original_lines) - len(new_lines))
+                if deleted_lines > max_deletions:
+                    log.append(f"iter {i} [{which}]: DELETION_TOO_HIGH ({deleted_lines} lines deleted from {target_path_str})")
+                    set_ticket_status(ticket, "blocked", "\n".join(log) + f"\n\nModel deleted {deleted_lines} lines from {target_path_str}, exceeding max allowed {max_deletions}.")
+                    append_log(ticket, "blocked", [f"iter {i} [{which}]: DELETION_TOO_HIGH ({deleted_lines} > {max_deletions})"])
+                    notify(cfg, "RED ouroboros " + ticket.id + ": implementer exceeded deletion limit.")
+                    print(f"{ticket.id}: implementer failed -> blocked (too many deletions from {target_path_str})")
+                    return True, "\n".join(log)
+        except Exception as exc:
+            # Do not hide errors - the guard must not silently fail.
+            log.append(f"iter {i} [{which}]: GUARD_ERROR ({type(exc).__name__}: {exc})")
+            print(f"{ticket.id}: guard exception - {type(exc).__name__}: {exc}")
+        # Fallback: empty-file guard for any file in worktree
+        deletions = 0
+        for p in wt.rglob("*"):
+            if p.is_file() and not any(str(p).startswith(protected_item) for protected_item in protected):
+                if ".git" in str(p):
+                    continue
+                try:
+                    if not p.read_text(encoding="utf-8", errors="replace").strip():
+                        deletions += 1
+                except:
+                    pass
+        if deletions > max_deletions:
+            log.append(f"iter {i} [{which}]: DELETION_TOO_HIGH ({deletions} empty files)")
+            set_ticket_status(ticket, "blocked", "\n".join(log) + f"\n\nModel emptied {deletions} files, exceeding max allowed {max_deletions}.")
+            append_log(ticket, "blocked", [f"iter {i} [{which}]: DELETION_TOO_HIGH ({deletions} > {max_deletions})"])
+            notify(cfg, "RED ouroboros " + ticket.id + ": implementer exceeded deletion limit.")
+            print(f"{ticket.id}: implementer failed -> blocked (too many empty files)")
+            return True, "\n".join(log)
+
         if not written:
             feedback = ("You proposed no file changes. If the ticket truly needs "
                         "no code change, explain why in plain text and propose a "
@@ -220,6 +314,7 @@ def run_reviewer(cfg, ticket, wt, branch: str, main_branch: str) -> tuple[bool, 
     test_cmd = cfg["gates"]["test_command"]
     test_timeout = int(cfg["budgets"]["test_timeout_seconds"])
     protected = cfg["gates"]["protected_paths"]
+    max_deletions = int(cfg["gates"].get("max_deletions_per_iteration", 0))
 
     file_list = repo_file_list(wt)
     area_src = read_area_files(wt, ticket)
