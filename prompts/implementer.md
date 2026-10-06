@@ -36,3 +36,10 @@ Propose each changed file as its own block — nothing else creates files:
    the harness will detect it and reject your output. Only ADD new content.
    If the file is too large to reproduce from context, propose a smaller, focused
    change to a smaller file instead.
+
+### APPEND: relative/path/from/repo/root.md
+```
+<new section / content to append>
+```
+
+Use APPEND when the ticket only adds content (new section, entries). Prefer it over rewriting the whole file. The harness handles line breaks; start your content with a blank line for markdown sections. APPEND cannot modify or delete existing content. If the file doesn't exist, it is created.
